@@ -1,8 +1,6 @@
-# LoRA Training for Qwen-Image & Qwen-Image-Edit
+# LoRA Training for Qwen-Image, Qwen-Image-Edit & FLUX.1-dev
 
-
-
-An open-source implementation for training LoRA (Low-Rank Adaptation) layers for Qwen/Qwen-Image and Qwen/Qwen-Image-Edit models by [FlyMy.AI](https://flymy.ai).
+An open-source implementation for training LoRA (Low-Rank Adaptation) layers for Qwen/Qwen-Image, Qwen/Qwen-Image-Edit, and FLUX.1-dev models by [FlyMy.AI](https://flymy.ai).
 
 <p align="center">
   <img src="./assets/flymy_transparent.png" alt="FlyMy.AI Logo" width="256">
@@ -21,7 +19,9 @@ Agentic Infra for GenAI. FlyMy.AI is a B2B infrastructure for building and runni
 - 🌐 [Official Website](https://flymy.ai)
 - 📚 [Documentation](https://docs.flymy.ai/intro)
 - 💬 [Discord Community](https://discord.com/invite/t6hPBpSebw)
-- 🤗 [Pre-trained LoRA Model](https://huggingface.co/flymy-ai/qwen-image-realism-lora)
+- 🤗 [Pre-trained Qwen LoRA Model](https://huggingface.co/flymy-ai/qwen-image-realism-lora)
+- 🤗 [Pre-trained FLUX LoRA Model](https://huggingface.co/flymy-ai/flux-dev-anne-hathaway-lora)
+- 🚀 [Train Your Own FLUX LoRA](https://app.flymy.ai/models/flymyai/flux-lora-trainer-fast)
 - 🐦 [X (Twitter)](https://x.com/flymyai)
 - 💼 [LinkedIn](https://linkedin.com/company/flymyai)
 - 📺 [YouTube](https://youtube.com/@flymyai)
@@ -30,14 +30,19 @@ Agentic Infra for GenAI. FlyMy.AI is a B2B infrastructure for building and runni
 ## 🚀 Features
 
 - LoRA-based fine-tuning for efficient training
-- Support for both Qwen-Image and Qwen-Image-Edit models
+- Support for Qwen-Image, Qwen-Image-Edit, and FLUX.1-dev models
 - Compatible with Hugging Face `diffusers`
 - Easy configuration via YAML
 - Control-based image editing with LoRA
 - Open-source implementation for LoRA training
-- Full training for Qwen-Image
+- Full training support for Qwen-Image
+- High-quality portrait and character training for FLUX
 
 ## 📅 Updates
+
+**16.10.2025**
+- ✅ Added FLUX.1-dev LoRA training support
+- ✅ Added pre-trained FLUX LoRA model example
 
 **02.09.2025**
 - ✅ Added full training for Qwen-Image and Qwen-Image-Edit
@@ -60,6 +65,7 @@ Agentic Infra for GenAI. FlyMy.AI is a B2B infrastructure for building and runni
 **📋 Development Plans:**
 - ✅ Basic code is working
 - ✅ Training functionality implemented
+- ✅ FLUX.1-dev support added
 - 🔄 Performance optimization in progress
 - 🔜 Test coverage coming soon
 
@@ -88,20 +94,24 @@ Agentic Infra for GenAI. FlyMy.AI is a B2B infrastructure for building and runni
 
 4. Download pre-trained LoRA weights (optional):
    ```bash
-   # Clone the repository with LoRA weights
+   # Qwen LoRA weights
    git clone https://huggingface.co/flymy-ai/qwen-image-realism-lora
+   
+   # FLUX LoRA weights
+   git clone https://huggingface.co/flymy-ai/flux-dev-anne-hathaway-lora
    
    # Or download specific files
    wget https://huggingface.co/flymy-ai/qwen-image-realism-lora/resolve/main/flymy_realism.safetensors
+   wget https://huggingface.co/flymy-ai/flux-dev-anne-hathaway-lora/resolve/main/pytorch_lora_weights.safetensors
    ```
 
 ---
 
 ## 📁 Data Preparation
 
-### Dataset Structure for Qwen-Image Training
+### Dataset Structure for Training
 
-The training data should follow the same format as Flux LoRA training, where each image has a corresponding text file with the same name:
+The training data should follow the same format for both Qwen and FLUX models, where each image has a corresponding text file with the same name:
 
 ```
 dataset/
@@ -153,19 +163,19 @@ my_training_data/
 
 ### Text File Content Examples
 
-**portrait_001.txt:**
+**For FLUX character training (portrait_001.txt):**
 ```
-A realistic portrait of a young woman with brown hair, natural lighting, professional photography style
+ohwx woman, professional headshot, studio lighting, elegant pose, looking at camera
 ```
 
-**landscape_042.txt:**
+**For Qwen landscape training (landscape_042.txt):**
 ```
 Mountain landscape at sunset, dramatic clouds, golden hour lighting, wide angle view
 ```
 
-**abstract_design.txt:**
+**For FLUX portrait training (abstract_design.txt):**
 ```
-Modern abstract art with geometric shapes, vibrant colors, minimalist composition
+ohwx woman, modern portrait style, soft lighting, artistic composition
 ```
 
 ### Data Preparation Tips
@@ -174,7 +184,9 @@ Modern abstract art with geometric shapes, vibrant colors, minimalist compositio
 2. **Description Quality**: Write detailed, accurate descriptions of your images
 3. **Consistency**: Maintain consistent style and quality across your dataset
 4. **Dataset Size**: For good results, use at least 10-50 image-text pairs
-5. **Trigger Words**: If training on a specific concept, include consistent trigger words in descriptions
+5. **Trigger Words**: 
+   - For FLUX character training: Use "ohwx woman" or "ohwx man" as trigger words
+   - For Qwen training: No specific trigger words required
 6. **Auto-generate descriptions**: You can generate image descriptions automatically using [Florence-2](https://huggingface.co/spaces/gokaygokay/Florence-2)
 
 ### Quick Data Validation
@@ -202,9 +214,11 @@ accelerate launch train_4090.py --config ./train_configs/train_lora_4090.yaml
 ![Sample Output](./assets/Valentin_24gb.jpg)
 
 
-## 🏁 Start Training
+## 🏁 Training
 
-### Qwen-Image LoRA Training
+# Qwen Models Training
+
+## Qwen-Image LoRA Training
 
 To begin training with your configuration file (e.g., `train_lora.yaml`), run:
 
@@ -463,9 +477,124 @@ with torch.inference_mode():
 
 ---
 
+# FLUX.1-dev Models Training
+
+## FLUX.1-dev LoRA Training
+
+FLUX.1-dev is a powerful text-to-image model that excels at generating high-quality portraits and character images. Our LoRA training implementation allows you to fine-tune FLUX for specific characters or styles.
+
+### Start FLUX Training
+
+To begin FLUX LoRA training with your configuration file, run:
+
+```bash
+accelerate launch train_flux_lora.py --config ./train_configs/train_flux_config.yaml
+```
+
+Make sure `train_flux_config.yaml` is correctly set up with paths to your dataset, model, output directory, and other parameters.
+
+### 🔧 FLUX.1-dev Initialization
+
+```python
+from diffusers import DiffusionPipeline
+import torch
+
+model_name = "black-forest-labs/FLUX.1-dev"
+
+# Load the pipeline
+if torch.cuda.is_available():
+    torch_dtype = torch.bfloat16
+    device = "cuda"
+else:
+    torch_dtype = torch.float32
+    device = "cpu"
+
+pipe = DiffusionPipeline.from_pretrained(model_name, torch_dtype=torch_dtype)
+pipe = pipe.to(device)
+```
+
+### 🔌 Load FLUX LoRA Weights
+
+```python
+# Load LoRA weights
+pipe.load_lora_weights('flymy-ai/flux-dev-anne-hathaway-lora', adapter_name="lora")
+```
+
+### 🎨 Generate Image with FLUX LoRA
+
+You can find our pre-trained FLUX LoRA weights [here](https://huggingface.co/flymy-ai/flux-dev-anne-hathaway-lora)
+
+**Trigger word required: "ohwx woman"**
+
+```python
+prompt = '''Portrait of ohwx woman, professional headshot, studio lighting, elegant pose, looking at camera, soft shadows, high quality, detailed facial features, cinematic lighting, 85mm lens, shallow depth of field'''
+negative_prompt = "blurry, low quality, distorted, bad anatomy"
+image = pipe(
+    prompt=prompt,
+    negative_prompt=negative_prompt,
+    width=1024,
+    height=1024,
+    num_inference_steps=30,
+    guidance_scale=3.5,
+    generator=torch.Generator(device="cuda").manual_seed(346346)
+)
+
+# Display the image (in Jupyter or save to file)
+image.images[0].show()
+# or
+image.images[0].save("output.png")
+```
+
+### 🖼️ Sample FLUX Output
+
+![Sample FLUX Output](./assets/lora.png)
+
+## 🎨 FLUX Generation Examples
+
+Below are examples of images generated with our FLUX Anne Hathaway LoRA model:
+
+### Casual Portrait Selfie
+
+**Prompt**: _"ohwx woman portrait selfie"_
+
+![Casual Portrait Selfie](./assets/flux1.png)
+
+### Artistic Double Exposure
+
+**Prompt**: _"ohwx woman perfectly symmetrical young female face close-up, presented with double exposure overlay blending nature textures like leaves and water"_
+
+![Artistic Double Exposure](./assets/flux2.png)
+
+### Golden Hour Macro Portrait
+
+**Prompt**: _"ohwx woman Macro photography style close-up of female face with light makeup, focused on eyes and lips, illuminated by golden hour sunlight for warm tones"_
+
+![Golden Hour Macro Portrait](./assets/flux3.png)
+
+### Cozy Portrait with Panda
+
+**Prompt**: _"Close-up of ohwx woman in brown knitted turtleneck sweater. Sitting with big black and white panda, hugging it, looking at camera"_
+
+![Cozy Portrait with Panda](./assets/flux4.png)
+
+### 🚀 Train Your Own FLUX LoRA
+
+Want to train your own FLUX LoRA model? Use our online training platform:
+
+**[🚀 Train Your Own FLUX LoRA on FlyMy.AI](https://app.flymy.ai/models/flymyai/flux-lora-trainer-fast)**
+
+Features:
+- ✅ Easy-to-use web interface
+- ✅ No local GPU required
+- ✅ Optimized training pipeline
+- ✅ Fast training times
+- ✅ Professional results
+
+---
+
 ## 🎛️ Using with ComfyUI
 
-We provide a ready-to-use ComfyUI workflow that works with our trained LoRA models. Follow these steps to set up and use the workflow:
+We provide ready-to-use ComfyUI workflows that work with both our Qwen and FLUX trained LoRA models. Follow these steps to set up and use the workflows:
 
 ### Setup Instructions
 
@@ -477,34 +606,43 @@ We provide a ready-to-use ComfyUI workflow that works with our trained LoRA mode
    - Follow the installation instructions from the [ComfyUI repository](https://github.com/comfyanonymous/ComfyUI?tab=readme-ov-file#installing)
    - Make sure all dependencies are properly installed
 
-3. **Download Qwen-Image model weights**:
+3. **Download model weights**:
+   
+   **For Qwen-Image:**
    - Go to [Qwen-Image ComfyUI weights](https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/tree/main)
    - Download all the model files
+   
+   **For FLUX.1-dev:**
+   - Go to [FLUX.1-dev model](https://huggingface.co/black-forest-labs/FLUX.1-dev)
+   - Download all the model files
 
-4. **Place Qwen-Image weights in ComfyUI**:
-   - Copy the downloaded Qwen-Image model files to the appropriate folders in `ComfyUI/models/`
-   - Follow the folder structure as specified in the model repository
+4. **Place model weights in ComfyUI**:
+   - Copy the downloaded model files to the appropriate folders in `ComfyUI/models/`
+   - Follow the folder structure as specified in the model repositories
 
 5. **Download our pre-trained LoRA weights**:
-   - Visit [flymy-ai/qwen-image-lora](https://huggingface.co/flymy-ai/qwen-image-lora)
+   - **Qwen LoRA:** [flymy-ai/qwen-image-realism-lora](https://huggingface.co/flymy-ai/qwen-image-realism-lora)
+   - **FLUX LoRA:** [flymy-ai/flux-dev-anne-hathaway-lora](https://huggingface.co/flymy-ai/flux-dev-anne-hathaway-lora)
    - Download the LoRA `.safetensors` files
 
 6. **Place LoRA weights in ComfyUI**:
-   - Copy the LoRA file `flymy-ai/qwen-image-lora/pytorch_lora_weights.safetensors` to `ComfyUI/models/loras/`
+   - Copy the LoRA files to `ComfyUI/models/loras/`
 
 7. **Load the workflow**:
    - Open ComfyUI in your browser
-   - Load the workflow file `qwen_image_lora_example.json` located in this repository
-   - The workflow is pre-configured to work with our LoRA models
+   - **For Qwen:** Load `qwen_image_lora_example.json`
+   - **For FLUX:** Load `flux_anne_hathaway_lora_example.json`
+   - The workflows are pre-configured to work with our LoRA models
 
 ### Workflow Features
 
 - ✅ Pre-configured for Qwen-Image + LoRA inference
+- ✅ Pre-configured for FLUX.1-dev + LoRA inference
 - ✅ Optimized settings for best quality output
 - ✅ Easy prompt and parameter adjustment
 - ✅ Compatible with all our trained LoRA models
 
-The ComfyUI workflow provides a user-friendly interface for generating images with our trained LoRA models without needing to write Python code.
+The ComfyUI workflows provide a user-friendly interface for generating images with our trained LoRA models without needing to write Python code.
 
 ### 🖼️ Workflow Screenshot
 
