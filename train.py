@@ -96,14 +96,14 @@ def main():
     elif accelerator.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
         args.mixed_precision = accelerator.mixed_precision
-    text_encoding_pipeline = QwenImagePipeline.from_pretrained(
+    text_encoding_pipeline = QwenImagePipeline.from_pretrained(  # 负责读取您的 .txt 文件并将其转换为“文本嵌入”。 text_encoder (文本编码器) 应该加载 Qwen-2.5-VL 模型
         args.pretrained_model_name_or_path, transformer=None, vae=None, torch_dtype=weight_dtype
     )
-    vae = AutoencoderKLQwenImage.from_pretrained(
+    vae = AutoencoderKLQwenImage.from_pretrained(  # vae: 负责将您的 .jpg 图片压缩成模型能理解的“潜空间”数据 (Latent)。
         args.pretrained_model_name_or_path,
         subfolder="vae",
     )
-    flux_transformer = QwenImageTransformer2DModel.from_pretrained(
+    flux_transformer = QwenImageTransformer2DModel.from_pretrained(  # flux_transformer: 这是 Qwen-Image 的“主大脑”，负责处理图像和文本。
         args.pretrained_model_name_or_path,
         subfolder="transformer",    )
     lora_config = LoraConfig(
@@ -117,7 +117,7 @@ def main():
         subfolder="scheduler",
     )
     flux_transformer.to(accelerator.device, dtype=weight_dtype)
-    flux_transformer.add_adapter(lora_config)
+    flux_transformer.add_adapter(lora_config)   # 它根据您 YAML 中的 rank: 16 创建了一个 LoRA 配置，然后调用 add_adapter 将这些微小的、可训练的 LoRA 层“注入”到 flux_transformer 的关键模块中
     text_encoding_pipeline.to(accelerator.device)
     noise_scheduler_copy = copy.deepcopy(noise_scheduler)
     def get_sigmas(timesteps, n_dim=4, dtype=torch.float32):
@@ -142,13 +142,13 @@ def main():
             param.requires_grad = False
             pass
         else:
-            param.requires_grad = True
+            param.requires_grad = True  # 冻结 flux_transformer 的所有原始参数（几十亿个参数），只保留 lora 层的参数为可训练状态（几百万个参数）
             print(n)
     print(sum([p.numel() for p in flux_transformer.parameters() if p.requires_grad]) / 1000000, 'parameters')
     lora_layers = filter(lambda p: p.requires_grad, flux_transformer.parameters())
 
     flux_transformer.enable_gradient_checkpointing()
-    optimizer = optimizer_cls(
+    optimizer = optimizer_cls(  # 它创建了一个 AdamW 优化器，并明确告诉它：“你只需要更新那些可训练的 lora_layers”
         lora_layers,
         lr=args.learning_rate,
         betas=(args.adam_beta1, args.adam_beta2),
@@ -156,7 +156,7 @@ def main():
         eps=args.adam_epsilon,
     )
 
-    train_dataloader = loader(**args.data_config)    
+    train_dataloader = loader(**args.data_config)  # 根据您 img_dir 的配置，初始化了数据加载器，准备开始读取您的 10 张图片和 .txt 文件
 
     lr_scheduler = get_scheduler(
         args.lr_scheduler,
@@ -198,7 +198,7 @@ def main():
                     pixel_values = img.to(dtype=weight_dtype).to(accelerator.device)
                     pixel_values = pixel_values.unsqueeze(2)
 
-                    pixel_latents = vae.encode(pixel_values).latent_dist.sample()
+                    pixel_latents = vae.encode(pixel_values).latent_dist.sample()  # 使用 vae 将图片转换为潜空间数据
                     pixel_latents = pixel_latents.permute(0, 2, 1, 3, 4)
 
                     latents_mean = (
@@ -209,11 +209,11 @@ def main():
                     latents_std = 1.0 / torch.tensor(vae.config.latents_std).view(1, 1, vae.config.z_dim, 1, 1).to(
                         pixel_latents.device, pixel_latents.dtype
                     )
-                    pixel_latents = (pixel_latents - latents_mean) * latents_std
+                    pixel_latents = (pixel_latents - latents_mean) * latents_std  # VAE数据归一化
                     
 
                     bsz = pixel_latents.shape[0]
-                    noise = torch.randn_like(pixel_latents, device=accelerator.device, dtype=weight_dtype)
+                    noise = torch.randn_like(pixel_latents, device=accelerator.device, dtype=weight_dtype)  # 它模拟一个“加噪”的过程，为模型去噪做准备
                     u = compute_density_for_timestep_sampling(
                         weighting_scheme="none",
                         batch_size=bsz,
@@ -238,14 +238,14 @@ def main():
                 # latent image ids for RoPE.
                 img_shapes = [(1, noisy_model_input.shape[3] // 2, noisy_model_input.shape[4] // 2)] * bsz
                 with torch.no_grad():
-                    prompt_embeds, prompt_embeds_mask = text_encoding_pipeline.encode_prompt(
+                    prompt_embeds, prompt_embeds_mask = text_encoding_pipeline.encode_prompt(  # 将您的描述（"ohwhwj man..."）转换为模型能理解的数学向量
                         prompt=prompts,
                         device=packed_noisy_model_input.device,
                         num_images_per_prompt=1,
                         max_sequence_length=1024,
                     )
                     txt_seq_lens = prompt_embeds_mask.sum(dim=1).tolist()
-                model_pred = flux_transformer(
+                model_pred = flux_transformer(  # 这是学习的关键） 模型同时接收“加噪的图像”和“文本向量”，然后预测出它认为“干净”的图像应该是什么样子
                     hidden_states=packed_noisy_model_input,
                     timestep=timesteps / 1000,
                     guidance=None,
@@ -263,13 +263,13 @@ def main():
                 )
                 weighting = compute_loss_weighting_for_sd3(weighting_scheme="none", sigmas=sigmas)
                 # flow-matching loss
-                target = noise - pixel_latents
+                target = noise - pixel_latents  # 模型应该预测出的标准答案
                 target = target.permute(0, 2, 1, 3, 4)
-                loss = torch.mean(
+                loss = torch.mean(  # (model_pred.float() - target.float()) 比喻： 教练拿出您射出的“实际轨迹” (model_pred)，和“完美轨迹” (target) 进行对比，计算它们之间的偏差
                     (weighting.float() * (model_pred.float() - target.float()) ** 2).reshape(target.shape[0], -1),
                     1,
                 )
-                loss = loss.mean()
+                loss = loss.mean()  # 您的“轨迹”是由几百万个像素点组成的。教练会计算出所有像素点上“惩罚值”的平均数
                 # Gather the losses across all processes for logging (if we use distributed training).
                 avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean()
                 train_loss += avg_loss.item() / args.gradient_accumulation_steps
@@ -289,7 +289,7 @@ def main():
                 accelerator.log({"train_loss": train_loss}, step=global_step)
                 train_loss = 0.0
 
-                if global_step % args.checkpointing_steps == 0:
+                if global_step % args.checkpointing_steps == 0:  # 250次保存一次
                     if accelerator.is_main_process:
                         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
                         if args.checkpoints_total_limit is not None:
@@ -319,12 +319,12 @@ def main():
                             os.mkdir(save_path)
                     except:
                         pass
-                    unwrapped_flux_transformer = unwrap_model(flux_transformer)
+                    unwrapped_flux_transformer = unwrap_model(flux_transformer)  # 从 accelerator 中“解包”出原始的 flux_transformer 模型
                     flux_transformer_lora_state_dict = convert_state_dict_to_diffusers(
                         get_peft_model_state_dict(unwrapped_flux_transformer)
                     )
 
-                    QwenImagePipeline.save_lora_weights(
+                    QwenImagePipeline.save_lora_weights(  # 将这些 LoRA 权重保存为 .safetensors 文件
                         save_path,
                         flux_transformer_lora_state_dict,
                         safe_serialization=True,

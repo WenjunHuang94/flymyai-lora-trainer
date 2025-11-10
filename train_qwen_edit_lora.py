@@ -144,7 +144,7 @@ def main():
     elif accelerator.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
         args.mixed_precision = accelerator.mixed_precision
-    text_encoding_pipeline = QwenImageEditPipeline.from_pretrained(
+    text_encoding_pipeline = QwenImageEditPipeline.from_pretrained(  # 加载Qwen/Qwen-Image-Edit模型
         args.pretrained_model_name_or_path, transformer=None, vae=None, torch_dtype=weight_dtype
     )
     text_encoding_pipeline.to(accelerator.device)
@@ -170,17 +170,17 @@ def main():
                 prompt_image = text_encoding_pipeline.image_processor.resize(img, calculated_height, calculated_width)
                 
                 prompt = open(txt_path, encoding='utf-8').read()
-                prompt_embeds, prompt_embeds_mask = text_encoding_pipeline.encode_prompt(
+                prompt_embeds, prompt_embeds_mask = text_encoding_pipeline.encode_prompt( # 它调用 QwenImageEditPipeline（内部是 Qwen-2.5-VL），让它同时“看”控制图并且**“读”文本指令**。它输出的 prompt_embeds（文本向量）已经融合了“它要改什么图”和“它要怎么改”这两个信息
                     image=prompt_image,
                     prompt=[prompt],
                     device=text_encoding_pipeline.device,
                     num_images_per_prompt=1,
                     max_sequence_length=1024,
                 )
-                if args.save_cache_on_disk:
+                if args.save_cache_on_disk:  # False
                     torch.save({'prompt_embeds': prompt_embeds[0].to('cpu'), 'prompt_embeds_mask': prompt_embeds_mask[0].to('cpu')}, os.path.join(txt_cache_dir, txt + '.pt'))
                 else:
-                    cached_text_embeddings[img_name.split('.')[0] + '.txt'] = {'prompt_embeds': prompt_embeds[0].to('cpu'), 'prompt_embeds_mask': prompt_embeds_mask[0].to('cpu')}
+                    cached_text_embeddings[img_name.split('.')[0] + '.txt'] = {'prompt_embeds': prompt_embeds[0].to('cpu'), 'prompt_embeds_mask': prompt_embeds_mask[0].to('cpu')}  # 预存“融合后”的文本向量
             # compute empty embedding
                 prompt_embeds_empty, prompt_embeds_mask_empty = text_encoding_pipeline.encode_prompt(
                     image=prompt_image,
@@ -209,7 +209,7 @@ def main():
         else:
             cached_image_embeddings = {}
         with torch.no_grad():
-            for img_name in tqdm([i for i in os.listdir(args.data_config.img_dir) if ".png" in i or ".jpg" in i]):
+            for img_name in tqdm([i for i in os.listdir(args.data_config.img_dir) if ".png" in i or ".jpg" in i]):  # 目标图
                 img = Image.open(os.path.join(args.data_config.img_dir, img_name)).convert('RGB')
                 calculated_width, calculated_height, _ = calculate_dimensions(1024 * 1024, img.size[0] / img.size[1])
                 img = text_encoding_pipeline.image_processor.resize(img, calculated_height, calculated_width)
@@ -219,19 +219,19 @@ def main():
                 pixel_values = img.unsqueeze(2)
                 pixel_values = pixel_values.to(dtype=weight_dtype).to(accelerator.device)
         
-                pixel_latents = vae.encode(pixel_values).latent_dist.sample().to('cpu')[0]
+                pixel_latents = vae.encode(pixel_values).latent_dist.sample().to('cpu')[0]  # VAE对目标图进行编码
                 if args.save_cache_on_disk:
                     torch.save(pixel_latents, os.path.join(img_cache_dir, img_name + '.pt'))
                     del pixel_latents
                 else:
-                    cached_image_embeddings[img_name] = pixel_latents
+                    cached_image_embeddings[img_name] = pixel_latents  # 所有“目标图”的“图片潜向量”也存储在 RAM 中
         if args.save_cache_on_disk:
             img_cache_dir = os.path.join(cache_dir, "img_embs_control")
             os.makedirs(img_cache_dir, exist_ok=True)
         else:
             cached_image_embeddings_control = {}
         with torch.no_grad():
-            for img_name in tqdm([i for i in os.listdir(args.data_config.control_dir) if ".png" in i or ".jpg" in i]):
+            for img_name in tqdm([i for i in os.listdir(args.data_config.control_dir) if ".png" in i or ".jpg" in i]):  # 控制图
                 img = Image.open(os.path.join(args.data_config.control_dir, img_name)).convert('RGB')
                 calculated_width, calculated_height, _ = calculate_dimensions(1024 * 1024, img.size[0] / img.size[1])
                 img = text_encoding_pipeline.image_processor.resize(img, calculated_height, calculated_width)
@@ -241,16 +241,16 @@ def main():
                 pixel_values = img.unsqueeze(2)
                 pixel_values = pixel_values.to(dtype=weight_dtype).to(accelerator.device)
         
-                pixel_latents = vae.encode(pixel_values).latent_dist.sample().to('cpu')[0]
+                pixel_latents = vae.encode(pixel_values).latent_dist.sample().to('cpu')[0]  # VAE对控制图进行编码
                 if args.save_cache_on_disk:
                     torch.save(pixel_latents, os.path.join(img_cache_dir, img_name + '.pt'))
                     del pixel_latents
                 else:
-                    cached_image_embeddings_control[img_name] = pixel_latents
+                    cached_image_embeddings_control[img_name] = pixel_latents  # 所有“控制图”的“图片潜向量”也存储在 RAM 中
         vae.to('cpu')
         torch.cuda.empty_cache()
         text_encoding_pipeline.to("cpu")
-        torch.cuda.empty_cache()
+        torch.cuda.empty_cache()  # 释放所有的 VRAM 显存，为接下来即将登场的、真正的主角——flux_transformer (DiT)——腾出空间。
     del text_encoding_pipeline
     gc.collect()
     #del vae
@@ -289,7 +289,7 @@ def main():
         flux_transformer.to(accelerator.device)
     else:
         flux_transformer.to(accelerator.device, dtype=weight_dtype)
-    flux_transformer.add_adapter(lora_config)
+    flux_transformer.add_adapter(lora_config)  # 这里加了lora的训练
     noise_scheduler_copy = copy.deepcopy(noise_scheduler)
     def get_sigmas(timesteps, n_dim=4, dtype=torch.float32):
         sigmas = noise_scheduler_copy.sigmas.to(device=accelerator.device, dtype=dtype)
@@ -332,7 +332,7 @@ def main():
         )
     train_dataloader = loader(cached_text_embeddings=cached_text_embeddings, cached_image_embeddings=cached_image_embeddings, 
                               cached_image_embeddings_control=cached_image_embeddings_control,
-                              **args.data_config)
+                              **args.data_config)  # train_dataloader里有加载了预存的目标图、控制图、融合文本等向量
 
     lr_scheduler = get_scheduler(
         args.lr_scheduler,
@@ -368,10 +368,10 @@ def main():
     vae_scale_factor = 2 ** len(vae.temperal_downsample)
     for epoch in range(1):
         train_loss = 0.0
-        for step, batch in enumerate(train_dataloader):
+        for step, batch in enumerate(train_dataloader):  # TODO: 这里崩溃的,原因是数据组织的不对，不能以./images开头，会按.进行切割，只能是dataset/images开头没有.的
             with accelerator.accumulate(flux_transformer):
                 if args.precompute_text_embeddings:
-                    img, prompt_embeds, prompt_embeds_mask, control_img = batch
+                    img, prompt_embeds, prompt_embeds_mask, control_img = batch  # img是目标图，control_img是控制图
                     prompt_embeds, prompt_embeds_mask = prompt_embeds.to(dtype=weight_dtype).to(accelerator.device), prompt_embeds_mask.to(dtype=torch.int32).to(accelerator.device)
                     control_img = control_img.to(dtype=weight_dtype).to(accelerator.device)
                     
@@ -412,17 +412,17 @@ def main():
                     timesteps = noise_scheduler_copy.timesteps[indices].to(device=pixel_latents.device)
 
                 sigmas = get_sigmas(timesteps, n_dim=pixel_latents.ndim, dtype=pixel_latents.dtype)
-                noisy_model_input = (1.0 - sigmas) * pixel_latents + sigmas * noise
+                noisy_model_input = (1.0 - sigmas) * pixel_latents + sigmas * noise  # 它给“目标图”加上噪声
                 # Concatenate across channels.
                 # pack the latents.
-                packed_noisy_model_input = QwenImageEditPipeline._pack_latents(
+                packed_noisy_model_input = QwenImageEditPipeline._pack_latents(  # 打包“加噪的目标图”
                     noisy_model_input,
                     bsz, 
                     noisy_model_input.shape[2],
                     noisy_model_input.shape[3],
                     noisy_model_input.shape[4],
                 )
-                packed_control_img = QwenImageEditPipeline._pack_latents(
+                packed_control_img = QwenImageEditPipeline._pack_latents(  # 打包“控制图”
                     control_img,
                     bsz, 
                     control_img.shape[2],
@@ -432,7 +432,7 @@ def main():
                 # latent image ids for RoPE.
                 img_shapes = [[(1, noisy_model_input.shape[3] // 2, noisy_model_input.shape[4] // 2),
                               (1, control_img.shape[3] // 2, control_img.shape[4] // 2)]] * bsz
-                packed_noisy_model_input_concated = torch.cat([packed_noisy_model_input, packed_control_img], dim=1)
+                packed_noisy_model_input_concated = torch.cat([packed_noisy_model_input, packed_control_img], dim=1)  # 在通道维度（dim=1）上，把“加噪的目标图”和“控制图”“粘”在了一起，变成了一个“双倍宽度”的潜向量
                 with torch.no_grad():
                     if not args.precompute_text_embeddings:
                         prompt_embeds, prompt_embeds_mask = text_encoding_pipeline.encode_prompt(
@@ -442,17 +442,17 @@ def main():
                             max_sequence_length=1024,
                         )
                     txt_seq_lens = prompt_embeds_mask.sum(dim=1).tolist()
-                model_pred = flux_transformer(
-                    hidden_states=packed_noisy_model_input_concated,
+                model_pred = flux_transformer(  # 训练任务： “看着这个‘双倍图’（左边是你要修的，右边是原始图层），再听我的‘指令’（文本），请你预测出左边那个图层的‘完美轨迹’（target）。”
+                    hidden_states=packed_noisy_model_input_concated,  # 拼接后的“双倍宽度”图像
                     timestep=timesteps / 1000,
                     guidance=None,
                     encoder_hidden_states_mask=prompt_embeds_mask,
-                    encoder_hidden_states=prompt_embeds,
+                    encoder_hidden_states=prompt_embeds,  # 融合了控制图信息的“文本指令”
                     img_shapes=img_shapes,
                     txt_seq_lens=txt_seq_lens,
                     return_dict=False,
                 )[0]
-                model_pred = model_pred[:, : packed_noisy_model_input.size(1)]
+                model_pred = model_pred[:, : packed_noisy_model_input.size(1)]  # 模型的预测（model_pred）也是“双倍宽度”的。我们只关心它对“目标图”的预测，不关心它对“控制图”的预测。
 
                 model_pred = QwenImageEditPipeline._unpack_latents(
                     model_pred,
