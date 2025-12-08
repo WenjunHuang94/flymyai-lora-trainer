@@ -1,0 +1,49 @@
+# train_overfit.yaml (继续训练版)
+
+# 1. 模型路径
+original_model_path: Qwen/Qwen-Image
+
+# 【关键修改 1】把这里改成你刚刚训练出来的 checkpoint 路径！
+# 这样脚本启动时，就会加载你那“稍微有点模糊”的模型，而不是随机初始化的模型。
+transformer_path: ./output_overfit_high_precision_resume/checkpoint-best/transformer
+
+# 2. 数据配置 (不变)
+data_config:
+  train_batch_size: 1
+  num_workers: 0
+  img_size: 1024
+  caption_dropout_rate: 0.0
+  img_dir: ./my_training_data2
+  random_ratio: false
+  caption_type: txt
+
+# 3. 训练参数
+train_batch_size: 1
+output_dir: ./output_overfit_high_precision_resume2 # 【建议】改个名，避免覆盖旧日志
+max_train_steps: 10000       # 【关键修改 2】目标设为 1万步，看看极限在哪
+num_train_epochs: 10000      # 保持一致
+checkpointing_steps: 500     # 不用存太频
+
+# 【关键修改 3】学习率可以保持 2e-4，或者尝试降到 1e-4 进行精修
+learning_rate: 1e-4
+
+# 优化器配置 (保持 FP32 设置)
+use_8bit_adam: false
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_weight_decay: 0.0
+adam_epsilon: 1e-8
+
+lr_scheduler: constant
+lr_warmup_steps: 0
+
+# 其他配置 (保持 FP32)
+max_grad_norm: 1.0
+gradient_accumulation_steps: 1
+mixed_precision: "no"       # 必须保持 FP32
+freeze_text_encoder: true
+logging_dir: logs
+report_to: null
+checkpoints_total_limit: 2
+tracker_project_name: small_dit_overfit_fp32_resume
+resume_from_checkpoint: null # 这里填 null 即可，因为我们是通过 transformer_path 加载权重的

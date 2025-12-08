@@ -1,0 +1,55 @@
+# train_full_small_dit_edit.yaml
+# -----------------------------------------------------------------
+# 1. 定义我们的模型组件来自哪里
+# -----------------------------------------------------------------
+original_model_path: Qwen/Qwen-Image-Edit  # 【关键】使用 Edit 模型的 VAE/TextEncoder
+transformer_path: ./my_small_dit_1_7B     # 【关键】使用您的小型 DIT
+
+# -----------------------------------------------------------------
+# 2. 数据配置 (!! 必须使用 Edit 格式的数据 !!)
+# -----------------------------------------------------------------
+data_config:
+  train_batch_size: 1
+  num_workers: 4
+  img_size: 1024
+  caption_dropout_rate: 0.1
+  img_dir: dataset/images       # <--- !! 【【【目标图 目录】】】 !!
+  control_dir: dataset/control_images  # <--- !! 【【【控制图 目录】】】 !!
+  caption_type: txt
+
+# -----------------------------------------------------------------
+# 3. 缓存参数 (来自 train_qwen_edit_lora.py)
+#    (建议保持 True, 除非内存（RAM）极小)
+# -----------------------------------------------------------------
+precompute_text_embeddings: true
+precompute_image_embeddings: true
+save_cache_on_disk: false # False = 缓存到 RAM, 速度最快
+
+# -----------------------------------------------------------------
+# 4. 训练参数
+# -----------------------------------------------------------------
+train_batch_size: 1
+output_dir: ./output_small_dit_edit_training # <--- 新的输出目录
+max_train_steps: 20       # <--- 先设置一个较小的步数（例如 20）来测试
+num_train_epochs: 1
+use_8bit_adam: true
+learning_rate: 1e-5
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_weight_decay: 0.01
+adam_epsilon: 1e-8
+lr_scheduler: "cosine"
+lr_warmup_steps: 2
+
+# -----------------------------------------------------------------
+# 5. 其他配置
+# -----------------------------------------------------------------
+max_grad_norm: 1.0
+gradient_accumulation_steps: 4
+mixed_precision: "bf16"
+logging_dir: logs
+report_to: null
+checkpointing_steps: 10
+checkpoints_total_limit: 5
+tracker_project_name: small_dit_edit_full_training
+resume_from_checkpoint: latest

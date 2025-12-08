@@ -1,0 +1,51 @@
+# train_overfit.yaml
+
+# 1. 模型路径 (不变)
+original_model_path: Qwen/Qwen-Image
+transformer_path: ./my_small_dit_1_7B
+
+# 2. 数据配置 (不变)
+data_config:
+  train_batch_size: 1
+  num_workers: 0
+  img_size: 1024
+  caption_dropout_rate: 0.0
+  img_dir: ./my_training_data2
+  random_ratio: false
+  caption_type: txt
+
+# 3. 训练参数
+train_batch_size: 1
+output_dir: ./output_overfit_high_precision # 改个名字，方便区分
+max_train_steps: 2000      # 2000步全精度应该足够了
+num_train_epochs: 2000
+checkpointing_steps: 100   # 每200步存一次
+
+# 【修改点 1：提高学习率】
+learning_rate: 2e-4        # 甚至可以比 1e-4 再大一点点，或者保持 1e-4
+                           # 小模型通常能吃更大的 LR
+
+# 【修改点 2：关闭 8-bit 优化器】
+use_8bit_adam: false       # <--- 关掉！使用标准的 AdamW (float32)
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_weight_decay: 0.0
+adam_epsilon: 1e-8
+
+lr_scheduler: constant
+lr_warmup_steps: 0
+
+# 其他
+max_grad_norm: 1.0
+gradient_accumulation_steps: 1
+
+# 【修改点 3：关闭混合精度，使用 FP32】
+mixed_precision: "no"      # <--- 关键！不要用 bf16，用 float32
+                           # 这能保证微小的梯度也能被更新
+
+freeze_text_encoder: true
+logging_dir: logs
+report_to: null
+checkpoints_total_limit: 2
+tracker_project_name: small_dit_overfit_fp32
+resume_from_checkpoint: null

@@ -1,0 +1,52 @@
+# train_overfit_final.yaml
+
+# 1. 模型路径
+original_model_path: Qwen/Qwen-Image
+transformer_path: ./my_small_dit_1_7B
+
+# 2. 数据配置
+data_config:
+  train_batch_size: 1
+  num_workers: 0
+  img_size: 1024
+  caption_dropout_rate: 0.0  # 【关键】必须为 0，死记硬背
+  img_dir: ./my_training_data2
+  random_ratio: false
+  caption_type: txt
+
+# 3. 训练参数
+train_batch_size: 1
+output_dir: ./output_overfit_final_fp32
+max_train_steps: 3000      # FP32 下通常不需要 5000 步，3000 足够
+num_train_epochs: 3000
+checkpointing_steps: 200
+
+# --- 关键修改区域 ---
+
+# 1. 学习率：参考原版，调大！
+learning_rate: 5e-4        # 原版是 6e-4，小模型完全吃得消
+                           # 如果震荡太厉害，可以降回 2e-4
+
+# 2. 精度：必须全精度！
+mixed_precision: "no"      # <--- 解决马赛克的核心！使用 float32
+use_8bit_adam: false       # <--- 关闭量化优化器
+
+# 3. 调度器：保持恒定，持续施压
+lr_scheduler: constant
+lr_warmup_steps: 0
+
+# --------------------
+
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_weight_decay: 0.0
+adam_epsilon: 1e-8
+
+max_grad_norm: 1.0
+gradient_accumulation_steps: 1
+freeze_text_encoder: true
+logging_dir: logs
+report_to: null
+checkpoints_total_limit: 2
+tracker_project_name: small_dit_overfit_final
+resume_from_checkpoint: null

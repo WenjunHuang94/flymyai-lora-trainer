@@ -18,7 +18,7 @@ else:
     torch_dtype = torch.float32
     device = "cpu"
 
-pipe = DiffusionPipeline.from_pretrained(model_name, torch_dtype=torch_dtype)
+pipe = DiffusionPipeline.from_pretrained(model_name, torch_dtype=torch_dtype)  # TODO: 也可以直接调用QwenImagePipeline
 pipe = pipe.to(device)
 
 # =======================================================
@@ -52,7 +52,7 @@ print("=" * 50)
 # --- 2. 加载您训练好的 LoRA 权重 ---
 lora_load_start = time.time()
 # 【修改点 1】: 路径已更新为您自己的 checkpoint 路径
-lora_file_path = "/home/disk2/hwj/flymyai-lora-trainer/output/checkpoint-1000/pytorch_lora_weights.safetensors"
+lora_file_path = "/home/disk2/hwj/flymyai-lora-trainer/output/checkpoint-250/pytorch_lora_weights.safetensors"
 # lora_file_path = "/home/disk2/hwj/flymyai-lora-trainer/qwen-image-realism-lora/flymy_realism.safetensors"
 
 try:

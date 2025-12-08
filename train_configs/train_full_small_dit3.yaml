@@ -1,0 +1,58 @@
+# train_small_dit.yaml
+# -----------------------------------------------------------------
+# 1. 定义我们的模型组件来自哪里
+# -----------------------------------------------------------------
+original_model_path: Qwen/Qwen-Image  # 用于加载 VAE 和 Text Encoder
+transformer_path: ./my_medium_dit_3B # 【关键】用于加载我们的小型 DIT
+
+# -----------------------------------------------------------------
+# 2. 数据配置
+#    (!! 确保 img_dir 指向您的真实数据 !!)
+# -----------------------------------------------------------------
+data_config:
+  train_batch_size: 1
+  num_workers: 4
+  img_size: 1024
+  caption_dropout_rate: 0.1
+  img_dir: ./my_training_data  # <--- !! 【【【请务必检查此路径】】】 !!
+  random_ratio: false
+  caption_type: txt
+
+# -----------------------------------------------------------------
+# 3. 训练参数
+#    (根据您的显存调整 batch_size 和 gradient_accumulation_steps)
+# -----------------------------------------------------------------
+train_batch_size: 1
+output_dir: ./output_medium_dit_training  # <--- 新的输出目录
+max_train_steps: 20  # <--- 先设置一个较小的步数（例如1000）来测试
+num_train_epochs: 1
+
+# Optimizer settings
+learning_rate: 1e-4  # 从头训练，使用一个较小的学习率
+use_8bit_adam: true
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_weight_decay: 0.01
+adam_epsilon: 1e-8
+
+# Learning rate scheduler0
+lr_scheduler: cosine
+lr_warmup_steps: 2
+
+# Gradient settings
+max_grad_norm: 1.0
+gradient_accumulation_steps: 4
+
+# Precision and memory
+mixed_precision: "bf16"
+freeze_text_encoder: true
+
+# Logging and checkpointing
+logging_dir: logs
+report_to: null
+checkpointing_steps: 10  # <--- 每250步保存一次，用于测试
+checkpoints_total_limit: 5
+tracker_project_name: small_dit_full_training
+
+# Resume training
+resume_from_checkpoint: latest

@@ -432,7 +432,7 @@ def main():
                 # latent image ids for RoPE.
                 img_shapes = [[(1, noisy_model_input.shape[3] // 2, noisy_model_input.shape[4] // 2),
                               (1, control_img.shape[3] // 2, control_img.shape[4] // 2)]] * bsz
-                packed_noisy_model_input_concated = torch.cat([packed_noisy_model_input, packed_control_img], dim=1)  # 在通道维度（dim=1）上，把“加噪的目标图”和“控制图”“粘”在了一起，变成了一个“双倍宽度”的潜向量
+                packed_noisy_model_input_concated = torch.cat([packed_noisy_model_input, packed_control_img], dim=1)  # 在通道维度（dim=1）上，把“加噪的目标图”和“控制图”“粘”在了一起，变成了一个“双倍宽度”的潜向量  # TODO: 注意训练的时候用了目标图来加噪，实际使用是是纯噪声图
                 with torch.no_grad():
                     if not args.precompute_text_embeddings:
                         prompt_embeds, prompt_embeds_mask = text_encoding_pipeline.encode_prompt(

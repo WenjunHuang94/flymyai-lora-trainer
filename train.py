@@ -222,10 +222,10 @@ def main():
                         mode_scale=1.29,
                     )
                     indices = (u * noise_scheduler_copy.config.num_train_timesteps).long()
-                    timesteps = noise_scheduler_copy.timesteps[indices].to(device=pixel_latents.device)
+                    timesteps = noise_scheduler_copy.timesteps[indices].to(device=pixel_latents.device)  # 在每一步（step）训练开始时，脚本都会随机从 1000 个总时间步中**“抽取”**一个 t 值。比如，第 1 步抽到了 t=77，第 2 步抽到了 t=845
 
-                sigmas = get_sigmas(timesteps, n_dim=pixel_latents.ndim, dtype=pixel_latents.dtype)
-                noisy_model_input = (1.0 - sigmas) * pixel_latents + sigmas * noise
+                sigmas = get_sigmas(timesteps, n_dim=pixel_latents.ndim, dtype=pixel_latents.dtype)  # 脚本拿着刚抽到的 t=845，去“调度总管”（scheduler）的“Sigma 速查表”（scheduler.sigmas）里查找对应的**“混合比例” $\sigma$**（比如 0.81）。
+                noisy_model_input = (1.0 - sigmas) * pixel_latents + sigmas * noise  # 脚本执行“混合”：（1 - 0.81) * 您的干净图片 + 0.81 * 纯噪声。这就得到了在 t=845 时对应的“噪声图片”（noisy_model_input）。
                 # Concatenate across channels.
                 # pack the latents.
                 packed_noisy_model_input = QwenImagePipeline._pack_latents(
@@ -247,7 +247,7 @@ def main():
                     txt_seq_lens = prompt_embeds_mask.sum(dim=1).tolist()
                 model_pred = flux_transformer(  # 这是学习的关键） 模型同时接收“加噪的图像”和“文本向量”，然后预测出它认为“干净”的图像应该是什么样子
                     hidden_states=packed_noisy_model_input,
-                    timestep=timesteps / 1000,
+                    timestep=timesteps / 1000,  # 脚本把同一个随机抽取的 t 值（t=845），除以 1000（标准化为 0.845），然后作为 timestep 参数传入 flux_transformer（DiT）
                     guidance=None,
                     encoder_hidden_states_mask=prompt_embeds_mask,
                     encoder_hidden_states=prompt_embeds,
@@ -265,7 +265,7 @@ def main():
                 # flow-matching loss
                 target = noise - pixel_latents  # 模型应该预测出的标准答案
                 target = target.permute(0, 2, 1, 3, 4)
-                loss = torch.mean(  # (model_pred.float() - target.float()) 比喻： 教练拿出您射出的“实际轨迹” (model_pred)，和“完美轨迹” (target) 进行对比，计算它们之间的偏差
+                loss = torch.mean(  # (model_pred.float() - target.float()) 比喻： 教练拿出您射出的“实际轨迹” (model_pred)，和“完美轨迹” (target) 进行对比，计算它们之间的偏差  # TODO: 注意这里预测的是偏差
                     (weighting.float() * (model_pred.float() - target.float()) ** 2).reshape(target.shape[0], -1),
                     1,
                 )

@@ -7,14 +7,14 @@ data_config:
   num_workers: 4
   img_size: 1024
   caption_dropout_rate: 0.1
-  img_dir: /path/to/your/dataset
+  img_dir: ./my_training_data
   random_ratio: false
   caption_type: txt
 
 # Training parameters
 train_batch_size: 1
 output_dir: ./output_full_training
-max_train_steps: 30000
+max_train_steps: 20
 num_train_epochs: 1
 
 # Optimizer settings
@@ -40,7 +40,7 @@ freeze_text_encoder: true  # Keep text encoder frozen to save memory
 # Logging and checkpointing
 logging_dir: logs
 report_to: null  # Can be "wandb", "tensorboard", etc.
-checkpointing_steps: 1000
+checkpointing_steps: 20
 checkpoints_total_limit: 2
 tracker_project_name: qwen_image_full_training
 
