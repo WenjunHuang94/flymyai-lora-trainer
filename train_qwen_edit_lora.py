@@ -101,6 +101,7 @@ def main():
     # args.save_cache_on_disk = False
     args.precompute_text_embeddings = True
     args.precompute_image_embeddings = True
+    args.skip_cache_computation_if_exists = True  # 如果缓存已存在则跳过计算
 
     logging_dir = os.path.join(args.output_dir, args.logging_dir)
 
@@ -155,74 +156,105 @@ def main():
             cache_dir = os.path.join(args.output_dir, "cache")
             os.makedirs(cache_dir, exist_ok=True)
     if args.precompute_text_embeddings:
-        with torch.no_grad():
-            if args.save_cache_on_disk:
-                txt_cache_dir = os.path.join(cache_dir, "text_embs")
-                os.makedirs(txt_cache_dir, exist_ok=True)
-            else:
-                cached_text_embeddings = {}
-            for img_name in tqdm([i for i in os.listdir(args.data_config.control_dir) if ".png" in i or '.jpg' in i]):
-                img_path = os.path.join(args.data_config.control_dir, img_name)
-                txt_path = os.path.join(args.data_config.img_dir, os.path.splitext(img_name)[0] + '.txt')
-
-                img = Image.open(img_path).convert('RGB')
-                calculated_width, calculated_height, _ = calculate_dimensions(1024 * 1024, img.size[0] / img.size[1])
-                prompt_image = text_encoding_pipeline.image_processor.resize(img, calculated_height, calculated_width)
-                
-                prompt = open(txt_path, encoding='utf-8').read()
-                prompt_embeds, prompt_embeds_mask = text_encoding_pipeline.encode_prompt( # 它调用 QwenImageEditPipeline（内部是 Qwen-2.5-VL），让它同时“看”控制图并且**“读”文本指令**。它输出的 prompt_embeds（文本向量）已经融合了“它要改什么图”和“它要怎么改”这两个信息
-                    image=prompt_image,
-                    prompt=[prompt],
-                    device=text_encoding_pipeline.device,
-                    num_images_per_prompt=1,
-                    max_sequence_length=1024,
-                )
-                # key uses the caption filename, consistent with dataset lookup
+        txt_cache_dir = os.path.join(cache_dir, "text_embs")
+        os.makedirs(txt_cache_dir, exist_ok=True)
+        # 检查缓存是否已存在且完整有效
+        if args.save_cache_on_disk and args.skip_cache_computation_if_exists:
+            img_list = [i for i in os.listdir(args.data_config.control_dir) if ".png" in i or '.jpg' in i]
+            cache_exists = True
+            for img_name in img_list:
                 txt_key = os.path.splitext(img_name)[0] + ".txt"
-                if args.save_cache_on_disk:
-                    torch.save(
-                        {
+                cache_file = os.path.join(txt_cache_dir, txt_key + ".pt")
+                cache_file_empty = os.path.join(txt_cache_dir, txt_key + ".empty.pt")
+                
+                # 检查文件是否存在且有效（能正常加载）
+                def check_cache_file_valid(file_path):
+                    if not os.path.exists(file_path):
+                        return False
+                    try:
+                        data = torch.load(file_path, map_location='cpu')
+                        # 验证数据结构是否正确
+                        if isinstance(data, dict):
+                            return 'prompt_embeds' in data and 'prompt_embeds_mask' in data
+                        return True
+                    except (EOFError, RuntimeError, Exception) as e:
+                        logger.warning(f"缓存文件 {file_path} 损坏或无法加载: {e}")
+                        return False
+                
+                if not check_cache_file_valid(cache_file) or not check_cache_file_valid(cache_file_empty):
+                    cache_exists = False
+                    break
+            if cache_exists:
+                logger.info("文本嵌入缓存已存在且完整，跳过计算")
+            else:
+                logger.info("文本嵌入缓存不完整或损坏，开始重新计算...")
+        else:
+            cache_exists = False
+        
+        if not (args.save_cache_on_disk and args.skip_cache_computation_if_exists and cache_exists):
+            with torch.no_grad():
+                for img_name in tqdm([i for i in os.listdir(args.data_config.control_dir) if ".png" in i or '.jpg' in i]):
+                    img_path = os.path.join(args.data_config.control_dir, img_name)
+                    txt_path = os.path.join(args.data_config.img_dir, os.path.splitext(img_name)[0] + '.txt')
+
+                    img = Image.open(img_path).convert('RGB')
+                    calculated_width, calculated_height, _ = calculate_dimensions(1024 * 1024, img.size[0] / img.size[1])
+                    prompt_image = text_encoding_pipeline.image_processor.resize(img, calculated_height, calculated_width)
+                    
+                    prompt = open(txt_path, encoding='utf-8').read()
+                    prompt_embeds, prompt_embeds_mask = text_encoding_pipeline.encode_prompt( # 它调用 QwenImageEditPipeline（内部是 Qwen-2.5-VL），让它同时"看"控制图并且**"读"文本指令**。它输出的 prompt_embeds（文本向量）已经融合了"它要改什么图"和"它要怎么改"这两个信息
+                        image=prompt_image,
+                        prompt=[prompt],
+                        device=text_encoding_pipeline.device,
+                        num_images_per_prompt=1,
+                        max_sequence_length=1024,
+                    )
+                    # key uses the caption filename, consistent with dataset lookup
+                    txt_key = os.path.splitext(img_name)[0] + ".txt"
+                    if args.save_cache_on_disk:
+                        torch.save(
+                            {
+                                "prompt_embeds": prompt_embeds[0].to("cpu"),
+                                "prompt_embeds_mask": prompt_embeds_mask[0].to("cpu"),
+                            },
+                            os.path.join(txt_cache_dir, txt_key + ".pt"),
+                        )
+                    else:
+                        cached_text_embeddings[txt_key] = {
                             "prompt_embeds": prompt_embeds[0].to("cpu"),
                             "prompt_embeds_mask": prompt_embeds_mask[0].to("cpu"),
-                        },
-                        os.path.join(txt_cache_dir, txt_key + ".pt"),
+                        }  # 预存"融合后"的文本向量
+
+                    # 立即释放显存
+                    del prompt_embeds, prompt_embeds_mask
+                    torch.cuda.empty_cache()
+
+                    # compute empty embedding (caption dropout). For Qwen-Image-Edit the prompt embedding is image-conditioned,
+                    # so we cache an empty-text embedding per sample image.
+                    prompt_embeds_empty, prompt_embeds_mask_empty = text_encoding_pipeline.encode_prompt(
+                        image=prompt_image,
+                        prompt=[' '],
+                        device=text_encoding_pipeline.device,
+                        num_images_per_prompt=1,
+                        max_sequence_length=1024,
                     )
-                else:
-                    cached_text_embeddings[txt_key] = {
-                        "prompt_embeds": prompt_embeds[0].to("cpu"),
-                        "prompt_embeds_mask": prompt_embeds_mask[0].to("cpu"),
-                    }  # 预存"融合后"的文本向量
-
-                # 立即释放显存
-                del prompt_embeds, prompt_embeds_mask
-                torch.cuda.empty_cache()
-
-                # compute empty embedding (caption dropout). For Qwen-Image-Edit the prompt embedding is image-conditioned,
-                # so we cache an empty-text embedding per sample image.
-                prompt_embeds_empty, prompt_embeds_mask_empty = text_encoding_pipeline.encode_prompt(
-                    image=prompt_image,
-                    prompt=[' '],
-                    device=text_encoding_pipeline.device,
-                    num_images_per_prompt=1,
-                    max_sequence_length=1024,
-                )
-                if args.save_cache_on_disk:
-                    torch.save(
-                        {
+                    if args.save_cache_on_disk:
+                        torch.save(
+                            {
+                                "prompt_embeds": prompt_embeds_empty[0].to("cpu"),
+                                "prompt_embeds_mask": prompt_embeds_mask_empty[0].to("cpu"),
+                            },
+                            os.path.join(txt_cache_dir, txt_key + ".empty.pt"),
+                        )
+                    else:
+                        cached_text_embeddings[txt_key + "empty_embedding"] = {
                             "prompt_embeds": prompt_embeds_empty[0].to("cpu"),
                             "prompt_embeds_mask": prompt_embeds_mask_empty[0].to("cpu"),
-                        },
-                        os.path.join(txt_cache_dir, txt_key + ".empty.pt"),
-                    )
-                else:
-                    cached_text_embeddings[txt_key + "empty_embedding"] = {
-                        "prompt_embeds": prompt_embeds_empty[0].to("cpu"),
-                        "prompt_embeds_mask": prompt_embeds_mask_empty[0].to("cpu"),
-                    }
+                        }
 
-                # 立即释放显存
-                del prompt_embeds_empty, prompt_embeds_mask_empty, prompt_image, img
-                torch.cuda.empty_cache()
+                    # 立即释放显存
+                    del prompt_embeds_empty, prompt_embeds_mask_empty, prompt_image, img
+                    torch.cuda.empty_cache()
 
     vae = AutoencoderKLQwenImage.from_pretrained(
         args.pretrained_model_name_or_path,
@@ -237,47 +269,95 @@ def main():
         if args.save_cache_on_disk:
             img_cache_dir = os.path.join(cache_dir, "img_embs")
             os.makedirs(img_cache_dir, exist_ok=True)
+            # 检查目标图缓存是否已存在且有效
+            if args.skip_cache_computation_if_exists:
+                img_list = [i for i in os.listdir(args.data_config.img_dir) if ".png" in i or ".jpg" in i]
+                def check_img_cache_file(file_path):
+                    if not os.path.exists(file_path):
+                        return False
+                    try:
+                        data = torch.load(file_path, map_location='cpu')
+                        # 验证是否是有效的tensor
+                        return isinstance(data, torch.Tensor)
+                    except (EOFError, RuntimeError, Exception) as e:
+                        logger.warning(f"缓存文件 {file_path} 损坏或无法加载: {e}")
+                        return False
+                
+                img_cache_exists = all(check_img_cache_file(os.path.join(img_cache_dir, img_name + '.pt')) for img_name in img_list)
+                if img_cache_exists:
+                    logger.info("目标图嵌入缓存已存在且完整，跳过计算")
+                else:
+                    logger.info("目标图嵌入缓存不完整或损坏，开始重新计算...")
+            else:
+                img_cache_exists = False
         else:
             cached_image_embeddings = {}
-        with torch.no_grad():
-            for img_name in tqdm([i for i in os.listdir(args.data_config.img_dir) if ".png" in i or ".jpg" in i]):  # 目标图
-                img = Image.open(os.path.join(args.data_config.img_dir, img_name)).convert('RGB')
-                calculated_width, calculated_height, _ = calculate_dimensions(1024 * 1024, img.size[0] / img.size[1])
-                img = text_encoding_pipeline.image_processor.resize(img, calculated_height, calculated_width)
-
-                img = torch.from_numpy((np.array(img) / 127.5) - 1)
-                img = img.permute(2, 0, 1).unsqueeze(0)
-                pixel_values = img.unsqueeze(2)
-                pixel_values = pixel_values.to(dtype=weight_dtype).to(accelerator.device)
+            img_cache_exists = False
         
-                pixel_latents = vae.encode(pixel_values).latent_dist.sample().to('cpu')[0]  # VAE对目标图进行编码
-                if args.save_cache_on_disk:
-                    torch.save(pixel_latents, os.path.join(img_cache_dir, img_name + '.pt'))
-                    del pixel_latents
-                else:
-                    cached_image_embeddings[img_name] = pixel_latents  # 所有“目标图”的“图片潜向量”也存储在 RAM 中
+        if not (args.save_cache_on_disk and args.skip_cache_computation_if_exists and img_cache_exists):
+            with torch.no_grad():
+                for img_name in tqdm([i for i in os.listdir(args.data_config.img_dir) if ".png" in i or ".jpg" in i]):  # 目标图
+                    img = Image.open(os.path.join(args.data_config.img_dir, img_name)).convert('RGB')
+                    calculated_width, calculated_height, _ = calculate_dimensions(1024 * 1024, img.size[0] / img.size[1])
+                    img = text_encoding_pipeline.image_processor.resize(img, calculated_height, calculated_width)
+
+                    img = torch.from_numpy((np.array(img) / 127.5) - 1)
+                    img = img.permute(2, 0, 1).unsqueeze(0)
+                    pixel_values = img.unsqueeze(2)
+                    pixel_values = pixel_values.to(dtype=weight_dtype).to(accelerator.device)
+            
+                    pixel_latents = vae.encode(pixel_values).latent_dist.sample().to('cpu')[0]  # VAE对目标图进行编码
+                    if args.save_cache_on_disk:
+                        torch.save(pixel_latents, os.path.join(img_cache_dir, img_name + '.pt'))
+                        del pixel_latents
+                    else:
+                        cached_image_embeddings[img_name] = pixel_latents  # 所有"目标图"的"图片潜向量"也存储在 RAM 中
         if args.save_cache_on_disk:
             control_img_cache_dir = os.path.join(cache_dir, "img_embs_control")
             os.makedirs(control_img_cache_dir, exist_ok=True)
+            # 检查控制图缓存是否已存在且有效
+            if args.skip_cache_computation_if_exists:
+                control_img_list = [i for i in os.listdir(args.data_config.control_dir) if ".png" in i or ".jpg" in i]
+                def check_control_img_cache_file(file_path):
+                    if not os.path.exists(file_path):
+                        return False
+                    try:
+                        data = torch.load(file_path, map_location='cpu')
+                        # 验证是否是有效的tensor
+                        return isinstance(data, torch.Tensor)
+                    except (EOFError, RuntimeError, Exception) as e:
+                        logger.warning(f"缓存文件 {file_path} 损坏或无法加载: {e}")
+                        return False
+                
+                control_img_cache_exists = all(check_control_img_cache_file(os.path.join(control_img_cache_dir, img_name + '.pt')) for img_name in control_img_list)
+                if control_img_cache_exists:
+                    logger.info("控制图嵌入缓存已存在且完整，跳过计算")
+                else:
+                    logger.info("控制图嵌入缓存不完整或损坏，开始重新计算...")
+            else:
+                control_img_cache_exists = False
         else:
             cached_image_embeddings_control = {}
-        with torch.no_grad():
-            for img_name in tqdm([i for i in os.listdir(args.data_config.control_dir) if ".png" in i or ".jpg" in i]):  # 控制图
-                img = Image.open(os.path.join(args.data_config.control_dir, img_name)).convert('RGB')
-                calculated_width, calculated_height, _ = calculate_dimensions(1024 * 1024, img.size[0] / img.size[1])
-                img = text_encoding_pipeline.image_processor.resize(img, calculated_height, calculated_width)
-
-                img = torch.from_numpy((np.array(img) / 127.5) - 1)
-                img = img.permute(2, 0, 1).unsqueeze(0)
-                pixel_values = img.unsqueeze(2)
-                pixel_values = pixel_values.to(dtype=weight_dtype).to(accelerator.device)
+            control_img_cache_exists = False
         
-                pixel_latents = vae.encode(pixel_values).latent_dist.sample().to('cpu')[0]  # VAE对控制图进行编码
-                if args.save_cache_on_disk:
-                    torch.save(pixel_latents, os.path.join(control_img_cache_dir, img_name + '.pt'))
-                    del pixel_latents
-                else:
-                    cached_image_embeddings_control[img_name] = pixel_latents  # 所有“控制图”的“图片潜向量”也存储在 RAM 中
+        if not (args.save_cache_on_disk and args.skip_cache_computation_if_exists and control_img_cache_exists):
+            with torch.no_grad():
+                for img_name in tqdm([i for i in os.listdir(args.data_config.control_dir) if ".png" in i or ".jpg" in i]):  # 控制图
+                    img = Image.open(os.path.join(args.data_config.control_dir, img_name)).convert('RGB')
+                    calculated_width, calculated_height, _ = calculate_dimensions(1024 * 1024, img.size[0] / img.size[1])
+                    img = text_encoding_pipeline.image_processor.resize(img, calculated_height, calculated_width)
+
+                    img = torch.from_numpy((np.array(img) / 127.5) - 1)
+                    img = img.permute(2, 0, 1).unsqueeze(0)
+                    pixel_values = img.unsqueeze(2)
+                    pixel_values = pixel_values.to(dtype=weight_dtype).to(accelerator.device)
+            
+                    pixel_latents = vae.encode(pixel_values).latent_dist.sample().to('cpu')[0]  # VAE对控制图进行编码
+                    if args.save_cache_on_disk:
+                        torch.save(pixel_latents, os.path.join(control_img_cache_dir, img_name + '.pt'))
+                        del pixel_latents
+                    else:
+                        cached_image_embeddings_control[img_name] = pixel_latents  # 所有"控制图"的"图片潜向量"也存储在 RAM 中
         vae.to('cpu')
         torch.cuda.empty_cache()
         text_encoding_pipeline.to("cpu")
