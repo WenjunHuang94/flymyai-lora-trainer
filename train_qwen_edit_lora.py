@@ -98,7 +98,7 @@ def calculate_dimensions(target_area, ratio):
 
 def main():
     args = OmegaConf.load(parse_args())
-    args.save_cache_on_disk = False
+    # args.save_cache_on_disk = False
     args.precompute_text_embeddings = True
     args.precompute_image_embeddings = True
 
@@ -163,7 +163,7 @@ def main():
                 cached_text_embeddings = {}
             for img_name in tqdm([i for i in os.listdir(args.data_config.control_dir) if ".png" in i or '.jpg' in i]):
                 img_path = os.path.join(args.data_config.control_dir, img_name)
-                txt_path = os.path.join(args.data_config.img_dir, img_name.split('.')[0] + '.txt')
+                txt_path = os.path.join(args.data_config.img_dir, os.path.splitext(img_name)[0] + '.txt')
 
                 img = Image.open(img_path).convert('RGB')
                 calculated_width, calculated_height, _ = calculate_dimensions(1024 * 1024, img.size[0] / img.size[1])
@@ -177,11 +177,28 @@ def main():
                     num_images_per_prompt=1,
                     max_sequence_length=1024,
                 )
-                if args.save_cache_on_disk:  # False
-                    torch.save({'prompt_embeds': prompt_embeds[0].to('cpu'), 'prompt_embeds_mask': prompt_embeds_mask[0].to('cpu')}, os.path.join(txt_cache_dir, txt + '.pt'))
+                # key uses the caption filename, consistent with dataset lookup
+                txt_key = os.path.splitext(img_name)[0] + ".txt"
+                if args.save_cache_on_disk:
+                    torch.save(
+                        {
+                            "prompt_embeds": prompt_embeds[0].to("cpu"),
+                            "prompt_embeds_mask": prompt_embeds_mask[0].to("cpu"),
+                        },
+                        os.path.join(txt_cache_dir, txt_key + ".pt"),
+                    )
                 else:
-                    cached_text_embeddings[img_name.split('.')[0] + '.txt'] = {'prompt_embeds': prompt_embeds[0].to('cpu'), 'prompt_embeds_mask': prompt_embeds_mask[0].to('cpu')}  # 预存“融合后”的文本向量
-            # compute empty embedding
+                    cached_text_embeddings[txt_key] = {
+                        "prompt_embeds": prompt_embeds[0].to("cpu"),
+                        "prompt_embeds_mask": prompt_embeds_mask[0].to("cpu"),
+                    }  # 预存"融合后"的文本向量
+
+                # 立即释放显存
+                del prompt_embeds, prompt_embeds_mask
+                torch.cuda.empty_cache()
+
+                # compute empty embedding (caption dropout). For Qwen-Image-Edit the prompt embedding is image-conditioned,
+                # so we cache an empty-text embedding per sample image.
                 prompt_embeds_empty, prompt_embeds_mask_empty = text_encoding_pipeline.encode_prompt(
                     image=prompt_image,
                     prompt=[' '],
@@ -189,11 +206,24 @@ def main():
                     num_images_per_prompt=1,
                     max_sequence_length=1024,
                 )
-                cached_text_embeddings[img_name.split('.')[0] + '.txt' + 'empty_embedding'] = {'prompt_embeds': prompt_embeds_empty[0].to('cpu'), 'prompt_embeds_mask': prompt_embeds_mask_empty[0].to('cpu')}
-                    
+                if args.save_cache_on_disk:
+                    torch.save(
+                        {
+                            "prompt_embeds": prompt_embeds_empty[0].to("cpu"),
+                            "prompt_embeds_mask": prompt_embeds_mask_empty[0].to("cpu"),
+                        },
+                        os.path.join(txt_cache_dir, txt_key + ".empty.pt"),
+                    )
+                else:
+                    cached_text_embeddings[txt_key + "empty_embedding"] = {
+                        "prompt_embeds": prompt_embeds_empty[0].to("cpu"),
+                        "prompt_embeds_mask": prompt_embeds_mask_empty[0].to("cpu"),
+                    }
 
+                # 立即释放显存
+                del prompt_embeds_empty, prompt_embeds_mask_empty, prompt_image, img
+                torch.cuda.empty_cache()
 
-    
     vae = AutoencoderKLQwenImage.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="vae",
@@ -202,6 +232,7 @@ def main():
     cached_image_embeddings = None
     img_cache_dir = None
     cached_image_embeddings_control = None
+    control_img_cache_dir = None
     if args.precompute_image_embeddings:
         if args.save_cache_on_disk:
             img_cache_dir = os.path.join(cache_dir, "img_embs")
@@ -226,8 +257,8 @@ def main():
                 else:
                     cached_image_embeddings[img_name] = pixel_latents  # 所有“目标图”的“图片潜向量”也存储在 RAM 中
         if args.save_cache_on_disk:
-            img_cache_dir = os.path.join(cache_dir, "img_embs_control")
-            os.makedirs(img_cache_dir, exist_ok=True)
+            control_img_cache_dir = os.path.join(cache_dir, "img_embs_control")
+            os.makedirs(control_img_cache_dir, exist_ok=True)
         else:
             cached_image_embeddings_control = {}
         with torch.no_grad():
@@ -243,7 +274,7 @@ def main():
         
                 pixel_latents = vae.encode(pixel_values).latent_dist.sample().to('cpu')[0]  # VAE对控制图进行编码
                 if args.save_cache_on_disk:
-                    torch.save(pixel_latents, os.path.join(img_cache_dir, img_name + '.pt'))
+                    torch.save(pixel_latents, os.path.join(control_img_cache_dir, img_name + '.pt'))
                     del pixel_latents
                 else:
                     cached_image_embeddings_control[img_name] = pixel_latents  # 所有“控制图”的“图片潜向量”也存储在 RAM 中
@@ -330,9 +361,15 @@ def main():
             weight_decay=args.adam_weight_decay,
             eps=args.adam_epsilon,
         )
-    train_dataloader = loader(cached_text_embeddings=cached_text_embeddings, cached_image_embeddings=cached_image_embeddings, 
-                              cached_image_embeddings_control=cached_image_embeddings_control,
-                              **args.data_config)  # train_dataloader里有加载了预存的目标图、控制图、融合文本等向量
+    train_dataloader = loader(
+        cached_text_embeddings=None if args.save_cache_on_disk else cached_text_embeddings,
+        cached_image_embeddings=None if args.save_cache_on_disk else cached_image_embeddings,
+        cached_image_embeddings_control=None if args.save_cache_on_disk else cached_image_embeddings_control,
+        txt_cache_dir=txt_cache_dir if args.save_cache_on_disk else None,
+        img_cache_dir=img_cache_dir if args.save_cache_on_disk else None,
+        control_img_cache_dir=control_img_cache_dir if args.save_cache_on_disk else None,
+        **args.data_config,
+    )  # train_dataloader里有加载了预存的目标图、控制图、融合文本等向量
 
     lr_scheduler = get_scheduler(
         args.lr_scheduler,
@@ -376,7 +413,8 @@ def main():
                     control_img = control_img.to(dtype=weight_dtype).to(accelerator.device)
                     
                 else:
-                    img, prompts = batch
+                    # control dataset returns (img, prompt, control_img) in non-precompute-text mode
+                    img, prompts, control_img = batch
                 with torch.no_grad():
                     if not args.precompute_image_embeddings:
                         pixel_values = img.to(dtype=weight_dtype).to(accelerator.device)
