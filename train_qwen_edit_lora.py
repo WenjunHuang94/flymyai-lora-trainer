@@ -99,8 +99,8 @@ def calculate_dimensions(target_area, ratio):
 def main():
     args = OmegaConf.load(parse_args())
     # args.save_cache_on_disk = False
-    args.precompute_text_embeddings = True
-    args.precompute_image_embeddings = True
+    # args.precompute_text_embeddings = True
+    # args.precompute_image_embeddings = True
     args.skip_cache_computation_if_exists = True  # 如果缓存已存在则跳过计算
 
     logging_dir = os.path.join(args.output_dir, args.logging_dir)
@@ -364,8 +364,8 @@ def main():
         torch.cuda.empty_cache()  # 释放所有的 VRAM 显存，为接下来即将登场的、真正的主角——flux_transformer (DiT)——腾出空间。
     del text_encoding_pipeline
     gc.collect()
-    #del vae
-    gc.collect()
+    # 注意：如果 precompute_image_embeddings=False，VAE在训练循环中仍会被使用，不能删除
+    # 如果 precompute_image_embeddings=True，VAE已经在CPU上，不会占用GPU内存
     flux_transformer = QwenImageTransformer2DModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="transformer",    )
@@ -598,6 +598,9 @@ def main():
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
+                
+                # 清理中间变量释放内存
+                del model_pred, target, noisy_model_input, packed_noisy_model_input, packed_control_img, packed_noisy_model_input_concated
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:

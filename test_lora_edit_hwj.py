@@ -77,7 +77,7 @@ with torch.inference_mode():
 print("图像编辑完成！")
 
 # --- 5. 保存结果 ---
-output_filename = "TEST_EDIT_LORA_RESULT2.png"
+output_filename = "TEST_EDIT_LORA_RESULT3.png"
 output_image.save(output_filename)
 print(f"测试结果已保存为: {os.path.abspath(output_filename)}")
 print("=" * 50)
