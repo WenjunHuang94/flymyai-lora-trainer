@@ -4,8 +4,8 @@ data_config:
   num_workers: 4
   img_size: 1024
   caption_dropout_rate: 0.1
-  img_dir: dataset/images
-  control_dir: dataset/control_images
+  img_dir: dataset/images2
+  control_dir: dataset/control_images2
   random_ratio: false # support multi crop preprocessing
   caption_type: txt
 report_to: null
@@ -22,15 +22,15 @@ adam_epsilon: 1e-8
 max_grad_norm: 1.0
 logging_dir: logs
 mixed_precision: "bf16"
-checkpointing_steps: 20
+checkpointing_steps: 10
 checkpoints_total_limit: 10
 tracker_project_name: lora_test
 resume_from_checkpoint: latest
 gradient_accumulation_steps: 1
-rank: 16
+rank: 32
 precompute_text_embeddings: true
 precompute_image_embeddings: true
-quantize: false
-adam8bit: false
+quantize: true
+adam8bit: true
 save_cache_on_disk: true
 
