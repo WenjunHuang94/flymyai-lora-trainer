@@ -4,8 +4,8 @@ data_config:
   num_workers: 4
   img_size: 1024
   caption_dropout_rate: 0.1
-  img_dir: dataset/images2
-  control_dir: dataset/control_images2
+  img_dir: dataset/images
+  control_dir: dataset/control_images
   random_ratio: false # support multi crop preprocessing
   caption_type: txt
 report_to: null
